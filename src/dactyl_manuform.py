@@ -67,6 +67,9 @@ def rad2deg(rad: float) -> float:
 
 debug_exports = False
 debug_trace = False
+debug_trackball = os.environ.get("DEBUG_TRACKBALL") == "1"
+debug_trackball_exports = os.environ.get("DEBUG_TRACKBALL_EXPORTS") == "1"
+debug_trackball_overlay = os.environ.get("DEBUG_TRACKBALL_OVERLAY") == "1"
 
 
 def debugprint(info):
@@ -1818,16 +1821,17 @@ def make_dactyl():
         shape = import_file(tb_file)
         sensor = import_file(sens_file)
         cutter = import_file(tbcut_file)
+        sensor_cutter = None
 
         if joystick:
             shape = rotate(shape, (0, 0, 35))
             shape = translate(shape, (0, 0, 1.2))
 
         if not btus and not ceramic:
-            cutter = union([cutter, import_file(senscut_file)])
+            sensor_cutter = import_file(senscut_file)
 
         # return shape, cutter
-        return shape, cutter, sensor
+        return shape, cutter, sensor, sensor_cutter
 
 
     def trackball_ball(segments=100, side="right"):
@@ -1841,6 +1845,10 @@ def make_dactyl():
         if use_btus(cluster):
             tb_t_offset = tb_btu_socket_translation_offset
             tb_r_offset = tb_btu_socket_rotation_offset
+        if debug_trackball:
+            print("DEBUG trackball offsets:")
+            print(f"  tb_t_offset={tb_t_offset} tb_r_offset={tb_r_offset} rot={rot} pos={pos}")
+            print(f"  engine={ENGINE} btus={use_btus(cluster)} ceramic={ceramic} joystick={joystick}")
 
         precut = trackball_cutout()
         precut = rotate(precut, tb_r_offset)
@@ -1848,7 +1856,7 @@ def make_dactyl():
         precut = rotate(precut, rot)
         precut = translate(precut, pos)
 
-        shape, cutout, sensor = trackball_socket(btus=use_btus(cluster))
+        shape, cutout, sensor, sensor_cutout = trackball_socket(btus=use_btus(cluster))
 
         if corner_walls:
             shape = translate(cylinder(21, 3), (0, 0, -1.5))
@@ -1867,6 +1875,19 @@ def make_dactyl():
         cutout = rotate(cutout, rot)
         cutout = translate(cutout, pos)
 
+        if sensor_cutout is not None:
+            sensor_cutout = rotate(sensor_cutout, tb_r_offset)
+            sensor_cutout = translate(sensor_cutout, tb_t_offset)
+            if ENGINE == 'cadquery':
+                if debug_trackball:
+                    print("DEBUG trackball: applying cadquery sensor cutout Z shift of -15")
+                sensor_cutout = translate(sensor_cutout, (0, 0, -15))
+            sensor_cutout = rotate(sensor_cutout, tb_sensor_rotation_offset)
+            sensor_cutout = translate(sensor_cutout, tb_sensor_translation_offset)
+            sensor_cutout = rotate(sensor_cutout, rot)
+            sensor_cutout = translate(sensor_cutout, pos)
+            cutout = union([cutout, sensor_cutout])
+
         # Small adjustment due to line to line surface / minute numerical error issues
         # Creates small overlap to assist engines in union function later
         sensor = rotate(sensor, tb_r_offset)
@@ -1874,9 +1895,9 @@ def make_dactyl():
 
         # Hackish?  Oh, yes. But it builds with latest cadquery.
         if ENGINE == 'cadquery':
+            if debug_trackball:
+                print("DEBUG trackball: applying cadquery sensor Z shift of -15")
             sensor = translate(sensor, (0, 0, -15))
-        # sensor = rotate(sensor, tb_sensor_translation_offset)
-        # sensor = translate(sensor, tb_sensor_rotation_offset)
         sensor = translate(sensor, (0, 0, .005))
         sensor = rotate(sensor, rot)
         sensor = translate(sensor, pos)
@@ -1890,6 +1911,16 @@ def make_dactyl():
 
         if corner_walls:
             ball = union([shape, ball])
+
+        if debug_trackball_exports:
+            export_file(shape=precut, fname=path.join(save_path, config_name + r"_debug_tb_precut"))
+            export_file(shape=shape, fname=path.join(save_path, config_name + r"_debug_tb_socket"))
+            export_file(shape=cutout, fname=path.join(save_path, config_name + r"_debug_tb_cutout"))
+            export_file(shape=sensor, fname=path.join(save_path, config_name + r"_debug_tb_sensor"))
+            export_file(shape=ball, fname=path.join(save_path, config_name + r"_debug_tb_ball"))
+            if debug_trackball_overlay:
+                export_file(shape=add([shape, cutout, sensor]),
+                            fname=path.join(save_path, config_name + r"_debug_tb_overlay"))
 
         # return precut, shape, cutout, ball
         return precut, shape, cutout, sensor, ball
@@ -2957,4 +2988,3 @@ if __name__ == '__main__':
 
     # base = baseplate()
     # export_file(shape=base, fname=path.join(save_path, config_name + r"_plate"))
-
